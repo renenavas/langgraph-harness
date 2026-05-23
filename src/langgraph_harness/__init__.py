@@ -1,3 +1,5 @@
+__version__ = "0.1.0"
+
 from .factory import build_default_harness, default_db_dir
 from .harness import Harness
 from .permissions import Decision, PermissionPolicy, allow_all

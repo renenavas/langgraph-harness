@@ -16,19 +16,27 @@ from __future__ import annotations
 
 import argparse
 import itertools
+import os
 import random
 import sys
 import threading
 import time
 import uuid
 
+from rich import box
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
+from . import __version__
 from .harness import Harness
 from .permissions import allow_all
 from .registry import ToolRegistry
 from .tools import DEFAULT_TOOLS
+
+_SALMON = "#ff8a65"
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are a precise coding assistant working in the user's current directory. "
@@ -123,6 +131,54 @@ def _short(value, limit: int = 40) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def _print_banner(model: str, cwd: str, n_tools: int) -> None:
+    mascot = "\n".join([
+        "▗▄▄▄▄▄▄▄▖",
+        "▐█ ▀ ▀ █▌",
+        "▐██ ▼ ██▌",
+        "▐▄▄▄▄▄▄▄▌",
+        "▝▘     ▝▘",
+    ])
+
+    left = Table.grid()
+    left.add_column(justify="center")
+    left.add_row(Text("Welcome back!", style="bold"))
+    left.add_row(Text(mascot, style=_SALMON))
+    left.add_row(Text(f"{model} · {n_tools} tools", style="dim"))
+    left.add_row(Text(cwd, style="dim"))
+
+    right = Table.grid()
+    right.add_column()
+    right.add_row(Text("Tips for getting started", style=f"bold {_SALMON}"))
+    right.add_row(Text("Ask it to read a file, grep the repo, or run a command."))
+    right.add_row(Text(""))
+    right.add_row(Text("Commands", style=f"bold {_SALMON}"))
+    right.add_row(Text("/new   restart the conversation"))
+    right.add_row(Text("/exit  or Ctrl-D to quit"))
+
+    body = Table.grid(padding=(0, 4))
+    body.add_column()
+    body.add_column()
+    body.add_row(left, right)
+
+    _console.print(Panel(
+        body,
+        title=f"langgraph-harness v{__version__}",
+        title_align="left",
+        border_style=_SALMON,
+        box=box.ROUNDED,
+        padding=(1, 2),
+    ))
+
+
+def _read_prompt() -> str:
+    """Input enmarcado entre dos líneas horizontales, estilo coding-assistant."""
+    _console.rule(style="grey39")
+    line = input("\033[1m› \033[0m")
+    _console.rule(style="grey39")
+    return line
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="harness", description="Interactive agent harness REPL")
     parser.add_argument("--model", default="claude-sonnet-4-6", help="Anthropic model id")
@@ -139,12 +195,11 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     thread_id = uuid.uuid4().hex[:8]
-    print(f"\033[1mlanggraph-harness\033[0m — model={args.model}  thread={thread_id}")
-    print("Escribí un mensaje. /new para reiniciar, /exit o Ctrl-D para salir.\n")
+    _print_banner(args.model, os.getcwd(), len(DEFAULT_TOOLS))
 
     while True:
         try:
-            line = input("\033[1m› \033[0m").strip()
+            line = _read_prompt().strip()
         except (EOFError, KeyboardInterrupt):
             print()
             return 0
