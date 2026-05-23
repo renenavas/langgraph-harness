@@ -15,7 +15,11 @@ Comandos dentro del REPL:
 from __future__ import annotations
 
 import argparse
+import itertools
+import random
 import sys
+import threading
+import time
 import uuid
 
 from rich.console import Console
@@ -35,6 +39,66 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 
 _console = Console()
+
+# Glyph que titila + gerundio que rota: el "pensando" estilo coding-assistant.
+_GLYPHS = "✻✽✼✺✶✷✸✹"
+_WORDS = [
+    "Sublimating", "Thinking", "Pondering", "Cogitating", "Conjuring", "Percolating",
+    "Ruminating", "Noodling", "Marinating", "Simmering", "Brewing", "Synthesizing",
+    "Daydreaming", "Tinkering", "Scheming", "Untangling", "Manifesting", "Channeling",
+]
+_GLYPH_COLOR = "\033[38;5;215m"  # salmón/naranja
+_BOLD = "\033[1m"
+_DIM = "\033[2m"
+_RESET = "\033[0m"
+
+
+def _fmt_elapsed(seconds: float) -> str:
+    s = int(seconds)
+    return f"{s // 60}m {s % 60}s" if s >= 60 else f"{s}s"
+
+
+class Spinner:
+    """Spinner animado en un hilo de fondo. No-op si stdout no es una TTY."""
+
+    def __init__(self) -> None:
+        self.start_time = time.time()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._word = random.choice(_WORDS)
+        self._word_at = self.start_time
+        self._enabled = sys.stdout.isatty()
+
+    def _spin(self) -> None:
+        glyphs = itertools.cycle(_GLYPHS)
+        while not self._stop.wait(0.12):
+            now = time.time()
+            if now - self._word_at > 4:
+                self._word = random.choice(_WORDS)
+                self._word_at = now
+            elapsed = _fmt_elapsed(now - self.start_time)
+            line = (
+                f"\r{_GLYPH_COLOR}{next(glyphs)}{_RESET} {_BOLD}{self._word}…{_RESET} "
+                f"{_DIM}({elapsed} · Ctrl-C para cortar){_RESET}\033[K"
+            )
+            sys.stdout.write(line)
+            sys.stdout.flush()
+
+    def resume(self) -> None:
+        if not self._enabled or (self._thread and self._thread.is_alive()):
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+        self._thread.start()
+
+    def pause(self) -> None:
+        if not self._enabled:
+            return
+        self._stop.set()
+        if self._thread:
+            self._thread.join()
+        sys.stdout.write("\r\033[K")  # limpia la línea del spinner
+        sys.stdout.flush()
 
 
 def _render(event: tuple) -> None:
@@ -94,13 +158,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\033[2mnueva conversación — thread={thread_id}\033[0m\n")
             continue
 
+        spinner = Spinner()
+        spinner.resume()
         try:
             for event in harness.chat(thread_id, line):
+                spinner.pause()
                 _render(event)
+                spinner.resume()
         except KeyboardInterrupt:
             print("\n\033[2m(interrumpido)\033[0m\n")
         except Exception as exc:  # noqa: BLE001 — el REPL no debe morir por un turno
             print(f"\n\033[31merror: {exc}\033[0m\n", file=sys.stderr)
+        finally:
+            spinner.pause()
 
 
 if __name__ == "__main__":

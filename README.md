@@ -99,7 +99,7 @@ harness --model claude-...   # pick the model
 python -m langgraph_harness   # equivalent entry point
 ```
 
-Inside the REPL: `/new` starts a fresh conversation, `/exit` (or Ctrl-D) quits. During an interactive turn the `ScheduleWakeup` tool blocks synchronously so the prompt only returns once the agent's turn completes.
+While the agent thinks, an animated spinner (a twinkling glyph, a rotating gerund, and an elapsed timer) shows on a background thread and clears as soon as output streams in. Inside the REPL: `/new` starts a fresh conversation, `/exit` (or Ctrl-D) quits. During an interactive turn the `ScheduleWakeup` tool blocks synchronously so the prompt only returns once the agent's turn completes.
 
 ---
 
