@@ -1,0 +1,17 @@
+[Unit]
+Description=langgraph-harness wakeup worker (reanuda waits persistidos)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rene
+WorkingDirectory=/home/rene/langgraph-harness
+# El API key se lee del entorno; ajustá el path si tus secrets viven en otro lado.
+EnvironmentFile=/home/rene/.secrets.env
+ExecStart=/usr/bin/env uv run harness-worker --interval 5
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

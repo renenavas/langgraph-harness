@@ -2,10 +2,16 @@
 Harness: integra registry + permission policy + LLM en un StateGraph LangGraph
 reutilizable, con wait no-bloqueante.
 
-El wait no-bloqueante usa el interrupt() nativo de LangGraph + threading.Timer:
-cuando una ControlTool con interrupts=True corre, el grafo persiste su estado
-en el checkpointer y devuelve el control al caller. Un Timer reanuda el grafo
-N segundos después con Command(resume=...), sin bloquear ningún hilo.
+El wait no-bloqueante usa el interrupt() nativo de LangGraph: cuando una
+ControlTool con interrupts=True corre, el grafo persiste su estado en el
+checkpointer y devuelve el control al caller, sin bloquear ningún hilo.
+
+La reanudación se hace de dos maneras:
+  - Sin `wakeup_store`: un threading.Timer en-proceso reanuda N segundos después
+    (sirve para procesos efímeros / demos; la cita muere si el proceso muere).
+  - Con `wakeup_store`: la cita se persiste en SQLite y un worker externo
+    (worker.py) la reanuda. Sobrevive a que el proceso se apague — es el
+    equivalente single-host de ScheduleWakeup.
 """
 
 from __future__ import annotations
@@ -30,6 +36,7 @@ from langgraph.types import Command, interrupt
 
 from .permissions import PermissionPolicy
 from .registry import ToolRegistry
+from .scheduler import WakeupStore
 from .tools.base import ControlTool
 
 
@@ -46,11 +53,13 @@ class Harness:
         system_prompt: str | None = None,
         model: str = "claude-sonnet-4-6",
         checkpointer=None,
+        wakeup_store: WakeupStore | None = None,
         verbose: bool = True,
     ) -> None:
         self.registry = registry
         self.policy = policy or PermissionPolicy()
         self.system_prompt = system_prompt
+        self.wakeup_store = wakeup_store
         self.verbose = verbose
 
         tools = registry.all()
@@ -200,12 +209,18 @@ class Harness:
             if isinstance(payload, dict) and payload.get("type") == "wait":
                 seconds = float(payload.get("wait_seconds", 1))
                 reason = payload.get("reason", "")
+
+                if self.wakeup_store is not None:
+                    self.wakeup_store.schedule(thread_id, time.time() + seconds, payload)
+                    if self.verbose:
+                        print(f"\n[{thread_id}] wait {seconds}s: '{reason}' — cita persistida; el worker reanuda.")
+                    return None
+
                 if self.verbose:
                     print(f"\n[{thread_id}] wait {seconds}s: '{reason}' — control devuelto al caller.")
-
                 # daemon=True: el proceso puede salir antes de que dispare el timer;
                 # usar non-daemon + join() si la reanudación no puede perderse.
-                timer = threading.Timer(seconds, self._resume, args=(thread_id,))
+                timer = threading.Timer(seconds, self.resume, args=(thread_id,))
                 timer.daemon = True
                 timer.start()
                 return None
@@ -218,7 +233,8 @@ class Harness:
             return content
         return None
 
-    def _resume(self, thread_id: str) -> str | None:
+    def resume(self, thread_id: str) -> str | None:
+        """Reanuda un grafo suspendido en un wait. Lo llama el Timer o el worker."""
         if self.verbose:
-            print(f"\n[{thread_id}] timer disparado — reanudando.")
+            print(f"\n[{thread_id}] reanudando.")
         return self._invoke(thread_id, Command(resume={"ok": True}))

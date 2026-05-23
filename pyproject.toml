@@ -9,12 +9,14 @@ requires-python = ">=3.11"
 dependencies = [
     "langchain-anthropic>=0.3",
     "langgraph>=0.2",
+    "langgraph-checkpoint-sqlite>=2",
     "langchain>=0.3",
     "pydantic>=2",
 ]
 
 [project.scripts]
 harness = "langgraph_harness.cli:main"
+harness-worker = "langgraph_harness.worker:main"
 
 [project.optional-dependencies]
 dev = [

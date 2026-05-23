@@ -37,6 +37,8 @@ BaseTool (LangChain)
 - **`Harness`** (`harness.py`) — compiles the `StateGraph` (llm → tools → llm) and owns the run/resume lifecycle.
 - **`ToolRegistry`** (`registry.py`) — name lookup plus `by_category()` / `by_risk()` filters.
 - **`PermissionPolicy`** (`permissions.py`) — maps `Risk` → `Decision` (`allow` / `deny` / `ask`) with a pluggable ask callback.
+- **`WakeupStore`** (`scheduler.py`) — a durable SQLite queue of `(thread_id, resume_at, payload)` rows for waits that must outlive the process.
+- **`worker.py`** — a polling daemon that resumes due wakeups from their checkpoint; `factory.py` (`build_default_harness`) wires the durable `SqliteSaver` + `WakeupStore` so the worker and the scheduling process build an identical agent.
 
 The harness dispatches a tool with `isinstance(tool, ControlTool) and tool.interrupts` rather than checking tool names, so adding another interrupting tool requires **no changes to the harness**.
 
@@ -65,6 +67,24 @@ harness.run(thread_id="session-1", message="Read /tmp/notes.txt and tell me how 
 ```
 
 The `wait` tool is non-blocking: `run()` returns immediately and the agent resumes on a timer.
+
+### Durable scheduling (survives process restarts)
+
+The in-process timer dies with the process. For a `wait` that outlives the process — the single-host equivalent of an external scheduler — wire a `WakeupStore` (SQLite) and run a worker:
+
+```python
+from langgraph_harness import build_default_harness
+
+# SqliteSaver checkpoints + a durable wakeup queue, both under ~/.langgraph-harness
+harness = build_default_harness(model="claude-sonnet-4-6")
+harness.run(thread_id="job-1", message="...")  # on a wait, persists the wakeup and returns
+```
+
+```bash
+harness-worker --interval 5   # polls the queue, resumes due threads from their checkpoint
+```
+
+When the agent hits a `wait`, the harness writes `(thread_id, resume_at, payload)` to SQLite and returns — the process may even exit. The worker (run it as a systemd service; see [`deploy/`](deploy/)) reads due rows and resumes the graph via `Command(resume=...)`. The scheduling process and the worker must share the same `db_dir` and be built identically (same model and tools).
 
 ## Interactive CLI
 

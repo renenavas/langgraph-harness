@@ -1,6 +1,8 @@
+from .factory import build_default_harness, default_db_dir
 from .harness import Harness
 from .permissions import Decision, PermissionPolicy, allow_all
 from .registry import ToolRegistry
+from .scheduler import Wakeup, WakeupStore
 from .tools import (
     DEFAULT_TOOLS,
     BashTool,
@@ -17,6 +19,10 @@ from .tools import (
 
 __all__ = [
     "Harness",
+    "build_default_harness",
+    "default_db_dir",
+    "WakeupStore",
+    "Wakeup",
     "ToolRegistry",
     "PermissionPolicy",
     "Decision",
