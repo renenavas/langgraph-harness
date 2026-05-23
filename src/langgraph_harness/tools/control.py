@@ -23,9 +23,10 @@ class WaitInput(BaseModel):
 
 
 class WaitTool(ControlTool):
-    name: str = "wait"
+    name: str = "ScheduleWakeup"
     description: str = (
-        "Pausa la ejecución por N segundos. Usá esta tool cuando:\n"
+        "Agenda una reanudación: suspende el grafo y lo despierta dentro de N segundos. "
+        "Con un wakeup_store la cita se persiste y sobrevive a que el proceso se apague. Usá esta tool cuando:\n"
         "  - Una operación necesita tiempo antes de poder reintentarse (rate limit, archivo en proceso de escritura)\n"
         "  - Querés hacer polling: intentá → fallá → esperá → reintentá\n"
         "Siempre incluí un reason descriptivo. Preferí esperas cortas con reintentos "

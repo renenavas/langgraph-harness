@@ -66,7 +66,7 @@ harness = Harness(
 harness.run(thread_id="session-1", message="Read /tmp/notes.txt and tell me how many lines it has.")
 ```
 
-The `wait` tool is non-blocking: `run()` returns immediately and the agent resumes on a timer.
+The `ScheduleWakeup` tool is non-blocking: `run()` returns immediately and the agent resumes on a timer.
 
 ### Durable scheduling (survives process restarts)
 
@@ -97,13 +97,13 @@ harness --model claude-...   # pick the model
 python -m langgraph_harness   # equivalent entry point
 ```
 
-Inside the REPL: `/new` starts a fresh conversation, `/exit` (or Ctrl-D) quits. During an interactive turn the `wait` tool blocks synchronously so the prompt only returns once the agent's turn completes.
+Inside the REPL: `/new` starts a fresh conversation, `/exit` (or Ctrl-D) quits. During an interactive turn the `ScheduleWakeup` tool blocks synchronously so the prompt only returns once the agent's turn completes.
 
 ---
 
 ## Tool catalog
 
-Tool names mirror Claude Code's (`Read`, `Grep`, `Write`, `Edit`, `Bash`) so an agent already familiar with them feels at home.
+Tool names mirror Claude Code's (`Read`, `Grep`, `Write`, `Edit`, `Bash`, `ScheduleWakeup`) so an agent already familiar with them feels at home.
 
 | Tool | Category | Risk | Notes |
 |---|---|---|---|
@@ -112,7 +112,7 @@ Tool names mirror Claude Code's (`Read`, `Grep`, `Write`, `Edit`, `Bash`) so an 
 | `Write` | filesystem | `reversible` | Create or overwrite |
 | `Edit` | filesystem | `reversible` | Exact-string replace; supports insert/delete/replace-all |
 | `Bash` | system | `destructive` | Run a shell command via `bash -c`; returns stdout+stderr and the exit code |
-| `wait` | control | `safe` | Non-blocking pause via `interrupt()` |
+| `ScheduleWakeup` | control | `safe` | Non-blocking pause via `interrupt()`; durable with a `WakeupStore` |
 
 **Risk levels** drive the permission layer:
 

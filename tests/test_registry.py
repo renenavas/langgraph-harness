@@ -26,14 +26,14 @@ def test_by_category():
     reg = ToolRegistry(DEFAULT_TOOLS)
     fs = reg.by_category("filesystem")
     assert {t.name for t in fs} == {"Read", "Grep", "Write", "Edit"}
-    assert {t.name for t in reg.by_category("control")} == {"wait"}
+    assert {t.name for t in reg.by_category("control")} == {"ScheduleWakeup"}
     assert {t.name for t in reg.by_category("system")} == {"Bash"}
 
 
 def test_by_risk():
     reg = ToolRegistry(DEFAULT_TOOLS)
     safe = {t.name for t in reg.by_risk(Risk.SAFE)}
-    assert safe == {"Read", "Grep", "wait"}
+    assert safe == {"Read", "Grep", "ScheduleWakeup"}
     reversible = {t.name for t in reg.by_risk(Risk.REVERSIBLE)}
     assert reversible == {"Write", "Edit"}
     destructive = {t.name for t in reg.by_risk(Risk.DESTRUCTIVE)}
@@ -42,5 +42,5 @@ def test_by_risk():
 
 def test_contains():
     reg = ToolRegistry(DEFAULT_TOOLS)
-    assert "wait" in reg
+    assert "ScheduleWakeup" in reg
     assert "nope" not in reg
