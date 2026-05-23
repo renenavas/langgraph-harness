@@ -29,12 +29,12 @@ class BashInput(BaseModel):
 
 
 class BashTool(HarnessTool):
-    name: str = "bash"
+    name: str = "Bash"
     description: str = (
         "Ejecuta un comando shell con `bash -c` y devuelve stdout+stderr combinados más el "
         "exit code. Un exit code != 0 NO es una excepción: se devuelve la salida para que "
-        "leas el error y reintentes. Para leer o editar archivos preferí read_file/edit_file; "
-        "usá bash para git, builds, tests, listados de directorios, etc."
+        "leas el error y reintentes. Para leer o editar archivos preferí Read/Edit; "
+        "usá Bash para git, builds, tests, listados de directorios, etc."
     )
     args_schema: type[BaseModel] = BashInput
     risk: Risk = Risk.DESTRUCTIVE

@@ -7,7 +7,7 @@ from langgraph_harness.tools import ReadFileTool
 def test_register_and_get():
     reg = ToolRegistry(DEFAULT_TOOLS)
     assert len(reg) == 6
-    assert reg.get("read_file").name == "read_file"
+    assert reg.get("Read").name == "Read"
 
 
 def test_duplicate_raises():
@@ -25,19 +25,19 @@ def test_get_missing_raises():
 def test_by_category():
     reg = ToolRegistry(DEFAULT_TOOLS)
     fs = reg.by_category("filesystem")
-    assert {t.name for t in fs} == {"read_file", "search_in_file", "write_file", "edit_file"}
+    assert {t.name for t in fs} == {"Read", "Grep", "Write", "Edit"}
     assert {t.name for t in reg.by_category("control")} == {"wait"}
-    assert {t.name for t in reg.by_category("system")} == {"bash"}
+    assert {t.name for t in reg.by_category("system")} == {"Bash"}
 
 
 def test_by_risk():
     reg = ToolRegistry(DEFAULT_TOOLS)
     safe = {t.name for t in reg.by_risk(Risk.SAFE)}
-    assert safe == {"read_file", "search_in_file", "wait"}
+    assert safe == {"Read", "Grep", "wait"}
     reversible = {t.name for t in reg.by_risk(Risk.REVERSIBLE)}
-    assert reversible == {"write_file", "edit_file"}
+    assert reversible == {"Write", "Edit"}
     destructive = {t.name for t in reg.by_risk(Risk.DESTRUCTIVE)}
-    assert destructive == {"bash"}
+    assert destructive == {"Bash"}
 
 
 def test_contains():

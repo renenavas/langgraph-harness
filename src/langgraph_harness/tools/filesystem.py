@@ -20,11 +20,11 @@ class ReadFileInput(BaseModel):
 
 
 class ReadFileTool(FileSystemTool):
-    name: str = "read_file"
+    name: str = "Read"
     description: str = (
         "Lee un archivo completo o un rango de líneas (start_line..end_line). "
         "Devuelve el contenido con números de línea prefijados para facilitar la búsqueda. "
-        "Usá esta tool ANTES de edit_file para obtener el texto exacto de old_string."
+        "Usá esta tool ANTES de Edit para obtener el texto exacto de old_string."
     )
     args_schema: type[BaseModel] = ReadFileInput
     risk: Risk = Risk.SAFE
@@ -62,11 +62,11 @@ class SearchInFileInput(BaseModel):
 
 
 class SearchInFileTool(FileSystemTool):
-    name: str = "search_in_file"
+    name: str = "Grep"
     description: str = (
         "Busca un patrón en un archivo y devuelve las ocurrencias con número de línea "
         "y líneas de contexto. Usá esta tool para:\n"
-        "  - Resolver ambigüedad en edit_file (ver dónde aparece cada ocurrencia)\n"
+        "  - Resolver ambigüedad en Edit (ver dónde aparece cada ocurrencia)\n"
         "  - Construir un old_string único incluyendo contexto circundante\n"
         "  - Verificar si algo existe antes de editarlo"
     )
@@ -87,7 +87,7 @@ class SearchInFileTool(FileSystemTool):
         if result.returncode == 1:
             return (
                 f"No se encontró '{pattern}' en '{file_path}'. "
-                "Revisá el patrón o leé el archivo completo con read_file."
+                "Revisá el patrón o leé el archivo completo con Read."
             )
         if result.returncode > 1:
             return self.error(f"al buscar: {result.stderr.strip()}")
@@ -102,10 +102,10 @@ class WriteFileInput(BaseModel):
 
 
 class WriteFileTool(FileSystemTool):
-    name: str = "write_file"
+    name: str = "Write"
     description: str = (
         "Crea un archivo nuevo o sobreescribe uno existente con el contenido dado. "
-        "Usá edit_file para cambios puntuales. Usá write_file solo para crear archivos nuevos "
+        "Usá Edit para cambios puntuales. Usá Write solo para crear archivos nuevos "
         "o cuando el cambio es tan grande que mandar el archivo entero es más limpio."
     )
     args_schema: type[BaseModel] = WriteFileInput
@@ -127,7 +127,7 @@ class EditFileInput(BaseModel):
         description="Texto exacto a usar como ancla. Debe aparecer exactamente una vez. "
         "Para insertar líneas nuevas, incluí las líneas vecinas como contexto y agregalas "
         "también en new_string. Para borrar, usá new_string vacío o más corto. "
-        "Si falla por ambigüedad, usá search_in_file para ver las ocurrencias y ampliá "
+        "Si falla por ambigüedad, usá Grep para ver las ocurrencias y ampliá "
         "old_string con más líneas de contexto hasta que sea único."
     )
     new_string: str = Field(description="Texto que reemplaza a old_string")
@@ -135,15 +135,15 @@ class EditFileInput(BaseModel):
 
 
 class EditFileTool(FileSystemTool):
-    name: str = "edit_file"
+    name: str = "Edit"
     description: str = (
         "Edita un archivo reemplazando old_string por new_string. "
         "new_string puede ser más largo (inserción), más corto (borrado parcial), "
         "o vacío (borrado completo del fragmento). "
         "Para insertar líneas nuevas, incluí las líneas circundantes en old_string "
         "como ancla e intercalalas en new_string. "
-        "Siempre leé el archivo con read_file primero para obtener el texto exacto. "
-        "Si old_string es ambiguo, usá search_in_file para resolverlo."
+        "Siempre leé el archivo con Read primero para obtener el texto exacto. "
+        "Si old_string es ambiguo, usá Grep para resolverlo."
     )
     args_schema: type[BaseModel] = EditFileInput
     risk: Risk = Risk.REVERSIBLE
@@ -156,7 +156,7 @@ class EditFileTool(FileSystemTool):
         replace_all: bool = False,
     ) -> str:
         path = Path(file_path)
-        if err := self._require_file(path, file_path, "Usá write_file para crearlo, o verificá la ruta."):
+        if err := self._require_file(path, file_path, "Usá Write para crearlo, o verificá la ruta."):
             return err
 
         content = path.read_text(encoding="utf-8")
@@ -165,14 +165,14 @@ class EditFileTool(FileSystemTool):
         if count == 0:
             return self.error(
                 f"old_string no encontrado en '{file_path}'.",
-                "Usá read_file para ver el contenido actual y copiá el texto exacto, "
+                "Usá Read para ver el contenido actual y copiá el texto exacto, "
                 "respetando espacios e indentación.",
             )
 
         if count > 1 and not replace_all:
             return self.error(
                 f"old_string aparece {count} veces — es ambiguo.",
-                "Usá search_in_file para ver dónde aparece cada ocurrencia, luego ampliá "
+                "Usá Grep para ver dónde aparece cada ocurrencia, luego ampliá "
                 "old_string con líneas de contexto únicas para identificar solo la que querés "
                 "editar. O pasá replace_all=True para reemplazarlas todas.",
             )

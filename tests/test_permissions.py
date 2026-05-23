@@ -26,7 +26,7 @@ def test_ask_rule_calls_ask_fn():
 
     policy = PermissionPolicy(rules={Risk.SAFE: Decision.ASK}, ask_fn=ask)
     assert policy.check(ReadFileTool(), {"x": 1}) is True
-    assert calls == ["read_file"]
+    assert calls == ["Read"]
 
 
 def test_ask_fn_can_deny():

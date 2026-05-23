@@ -83,13 +83,15 @@ Inside the REPL: `/new` starts a fresh conversation, `/exit` (or Ctrl-D) quits. 
 
 ## Tool catalog
 
+Tool names mirror Claude Code's (`Read`, `Grep`, `Write`, `Edit`, `Bash`) so an agent already familiar with them feels at home.
+
 | Tool | Category | Risk | Notes |
 |---|---|---|---|
-| `read_file` | filesystem | `safe` | Full file or a line range, line-numbered |
-| `search_in_file` | filesystem | `safe` | `grep -n` with context lines |
-| `write_file` | filesystem | `reversible` | Create or overwrite |
-| `edit_file` | filesystem | `reversible` | Exact-string replace; supports insert/delete/replace-all |
-| `bash` | system | `destructive` | Run a shell command via `bash -c`; returns stdout+stderr and the exit code |
+| `Read` | filesystem | `safe` | Full file or a line range, line-numbered |
+| `Grep` | filesystem | `safe` | `grep -n` within a file, with context lines |
+| `Write` | filesystem | `reversible` | Create or overwrite |
+| `Edit` | filesystem | `reversible` | Exact-string replace; supports insert/delete/replace-all |
+| `Bash` | system | `destructive` | Run a shell command via `bash -c`; returns stdout+stderr and the exit code |
 | `wait` | control | `safe` | Non-blocking pause via `interrupt()` |
 
 **Risk levels** drive the permission layer:
