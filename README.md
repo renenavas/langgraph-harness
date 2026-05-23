@@ -36,7 +36,7 @@ BaseTool (LangChain)
                 └── TaskTool      # spawns an isolated sub-agent
 ```
 
-- **`Harness`** (`harness.py`) — compiles the `StateGraph` (llm → tools → llm) and owns the run/resume lifecycle.
+- **`Harness`** (`harness.py`) — compiles the `StateGraph` (summarize → llm → tools → …) and owns the run/resume lifecycle. History lives in the checkpointer keyed by `thread_id`; a `summarize` node compacts old messages into a running summary once the history passes `summary_after_tokens`, cutting only on turn boundaries so tool-call pairs stay intact (set `summarize=False` to disable).
 - **`ToolRegistry`** (`registry.py`) — name lookup plus `by_category()` / `by_risk()` filters.
 - **`PermissionPolicy`** (`permissions.py`) — maps `Risk` → `Decision` (`allow` / `deny` / `ask`) with a pluggable ask callback.
 - **`WakeupStore`** (`scheduler.py`) — a durable SQLite queue of `(thread_id, resume_at, payload)` rows for waits that must outlive the process.

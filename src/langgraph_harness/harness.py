@@ -20,13 +20,14 @@ import threading
 import time
 import uuid
 from collections.abc import Iterator
-from typing import Annotated, Sequence, TypedDict
+from typing import Annotated, NotRequired, Sequence, TypedDict
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
     HumanMessage,
+    RemoveMessage,
     SystemMessage,
     ToolMessage,
 )
@@ -43,6 +44,16 @@ from .tools.base import ControlTool
 
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
+    summary: NotRequired[str]
+
+
+SUMMARY_PROMPT = (
+    "Sos un compresor de contexto. Te paso un fragmento de conversación entre un usuario y un "
+    "agente de coding (con sus llamadas a tools). Devolvé un resumen acumulativo, conciso pero "
+    "completo, que preserve: decisiones tomadas, hechos y datos concretos, rutas de archivos, "
+    "estado de tareas en curso y cualquier hilo abierto. No inventes nada que no esté en el "
+    "fragmento. Escribí en el mismo idioma que la conversación. Devolvé solo el resumen."
+)
 
 
 DEFAULT_SUBAGENT_PROMPT = (
@@ -63,6 +74,9 @@ class Harness:
         model: str = "claude-sonnet-4-6",
         checkpointer=None,
         wakeup_store: WakeupStore | None = None,
+        summarize: bool = True,
+        summary_after_tokens: int = 12_000,
+        keep_last_messages: int = 8,
         verbose: bool = True,
     ) -> None:
         self.registry = registry
@@ -70,10 +84,14 @@ class Harness:
         self.system_prompt = system_prompt
         self.wakeup_store = wakeup_store
         self.model = model
+        self.summarize = summarize
+        self.summary_after_tokens = summary_after_tokens
+        self.keep_last_messages = keep_last_messages
         self.verbose = verbose
 
         tools = registry.all()
         self.llm = ChatAnthropic(model=model).bind_tools(tools)
+        self._summarizer = ChatAnthropic(model=model)  # sin tools: solo resume
         self.graph = self._build_graph(checkpointer or MemorySaver())
 
         # Inyectarse en cada tool que lo necesite (p. ej. Task, que lanza sub-agentes).
@@ -82,15 +100,50 @@ class Harness:
 
     def _build_graph(self, checkpointer):
         graph = StateGraph(AgentState)
+        graph.add_node("summarize", self._summarize_node)
         graph.add_node("llm", self._llm_node)
         graph.add_node("tools", self._tools_node)
-        graph.add_edge(START, "llm")
+        # Pasamos por summarize justo antes de cada llamada al LLM, así el historial
+        # queda acotado tanto al arrancar un turno como tras ejecutar tools.
+        graph.add_edge(START, "summarize")
+        graph.add_edge("summarize", "llm")
         graph.add_conditional_edges("llm", self._should_continue, {"tools": "tools", END: END})
-        graph.add_edge("tools", "llm")
+        graph.add_edge("tools", "summarize")
         return graph.compile(checkpointer=checkpointer)
 
     def _llm_node(self, state: AgentState) -> dict:
-        return {"messages": [self.llm.invoke(state["messages"])]}
+        prompt_messages = self._with_summary(list(state["messages"]), state.get("summary", ""))
+        return {"messages": [self.llm.invoke(prompt_messages)]}
+
+    def _summarize_node(self, state: AgentState) -> dict:
+        if not self.summarize:
+            return {}
+        messages = list(state["messages"])
+        if self._estimate_tokens(messages) < self.summary_after_tokens:
+            return {}
+
+        has_system = bool(messages) and isinstance(messages[0], SystemMessage)
+        body = messages[1:] if has_system else messages
+
+        cut = self._cut_index(body, self.keep_last_messages)
+        to_summarize = body[:cut]
+        if not to_summarize:
+            return {}
+
+        new_summary = self._make_summary(to_summarize, state.get("summary", ""))
+        removals = [RemoveMessage(id=m.id) for m in to_summarize if m.id is not None]
+        if self.verbose:
+            print(f"\n[summarize] comprimí {len(removals)} mensajes viejos en un resumen.")
+        return {"messages": removals, "summary": new_summary}
+
+    def _make_summary(self, messages: list[BaseMessage], existing: str) -> str:
+        transcript = self._render_transcript(messages)
+        context = f"Resumen previo a integrar:\n{existing}\n\n" if existing else ""
+        response = self._summarizer.invoke([
+            SystemMessage(content=SUMMARY_PROMPT),
+            HumanMessage(content=f"{context}Fragmento a resumir:\n{transcript}"),
+        ])
+        return self._text(response.content).strip()
 
     def _tools_node(self, state: AgentState) -> dict:
         last_message = state["messages"][-1]
@@ -236,6 +289,63 @@ class Harness:
                     parts.append(block)
             return "".join(parts)
         return str(content)
+
+    @staticmethod
+    def _estimate_tokens(messages: Sequence[BaseMessage]) -> int:
+        """Estimación barata (~4 chars/token) para decidir cuándo resumir, sin llamar a la API."""
+        chars = sum(
+            len(m.content) if isinstance(m.content, str) else len(str(m.content))
+            for m in messages
+        )
+        return chars // 4
+
+    @staticmethod
+    def _cut_index(body: Sequence[BaseMessage], keep_last: int) -> int:
+        """
+        Índice donde arranca la ventana reciente a conservar. Se avanza hasta el próximo
+        HumanMessage en/después de (len - keep_last) para que el corte caiga en un borde de
+        turno y nunca parta un par tool_call/tool_result (lo que rompería la API de Anthropic).
+        Devuelve 0 (no resumir) si no hay un borde seguro en la cola.
+        """
+        if len(body) <= keep_last:
+            return 0
+        start = len(body) - keep_last
+        for i in range(start, len(body)):
+            if isinstance(body[i], HumanMessage):
+                return i
+        return 0
+
+    @staticmethod
+    def _with_summary(messages: list[BaseMessage], summary: str) -> list[BaseMessage]:
+        """Pliega el resumen dentro del system prompt (efímero) para la llamada al LLM."""
+        if not summary:
+            return messages
+        block = f"## Resumen de la conversación previa\n{summary}"
+        if messages and isinstance(messages[0], SystemMessage):
+            merged = SystemMessage(content=f"{messages[0].content}\n\n{block}")
+            return [merged, *messages[1:]]
+        return [SystemMessage(content=block), *messages]
+
+    @classmethod
+    def _render_transcript(cls, messages: Sequence[BaseMessage]) -> str:
+        lines = []
+        for m in messages:
+            if isinstance(m, SystemMessage):
+                role = "System"
+            elif isinstance(m, HumanMessage):
+                role = "User"
+            elif isinstance(m, AIMessage):
+                role = "Assistant"
+            elif isinstance(m, ToolMessage):
+                role = f"Tool[{m.name or '?'}]"
+            else:
+                role = "?"
+            text = cls._text(m.content)
+            if isinstance(m, AIMessage) and m.tool_calls:
+                calls = "; ".join(f"{c['name']}({c['args']})" for c in m.tool_calls)
+                text = f"{text} «llama: {calls}»".strip()
+            lines.append(f"{role}: {text}")
+        return "\n".join(lines)
 
     def _invoke(self, thread_id: str, invocation) -> str | None:
         config = {"configurable": {"thread_id": thread_id}}
