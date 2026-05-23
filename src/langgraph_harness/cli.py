@@ -18,6 +18,9 @@ import argparse
 import sys
 import uuid
 
+from rich.console import Console
+from rich.markdown import Markdown
+
 from .harness import Harness
 from .permissions import allow_all
 from .registry import ToolRegistry
@@ -26,14 +29,20 @@ from .tools import DEFAULT_TOOLS
 DEFAULT_SYSTEM_PROMPT = (
     "You are a precise coding assistant working in the user's current directory. "
     "Use the file tools to read before you edit. If a tool returns an ERROR, read it, "
-    "fix the call, and retry. Keep responses concise."
+    "fix the call, and retry. Keep responses concise. Your replies are rendered as "
+    "Markdown: use tables to compare options, fenced code blocks for code, and bold for "
+    "key terms when it aids clarity."
 )
+
+_console = Console()
 
 
 def _render(event: tuple) -> None:
     kind = event[0]
     if kind == "assistant":
-        print(f"\n{event[1].rstrip()}\n")
+        print()
+        _console.print(Markdown(event[1].rstrip()))
+        print()
     elif kind == "tool_call":
         name, args = event[1], event[2]
         compact = ", ".join(f"{k}={_short(v)}" for k, v in args.items())
