@@ -1,10 +1,11 @@
-"""Tools de control del agente: wait."""
+"""Tools de control del agente: ScheduleWakeup, Task."""
 
 from __future__ import annotations
 
 import time
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from .base import ControlTool, Risk
 
@@ -47,3 +48,38 @@ class WaitTool(ControlTool):
         # (p. ej. un AgentExecutor clásico). El Harness usa interrupt_payload().
         time.sleep(seconds)
         return self.resume_message({"wait_seconds": seconds, "reason": reason})
+
+
+class TaskInput(BaseModel):
+    description: str = Field(description="Resumen corto (3-5 palabras) de la subtarea.")
+    prompt: str = Field(
+        description="Instrucción completa y autocontenida para el sub-agente. NO ve esta "
+        "conversación, así que incluí todo el contexto, rutas y criterios de éxito que necesite."
+    )
+
+
+class TaskTool(ControlTool):
+    name: str = "Task"
+    description: str = (
+        "Lanza un sub-agente autónomo con su propio loop y contexto limpio para resolver una "
+        "subtarea acotada, y devuelve solo su resultado final. Usalo para trabajo self-contained "
+        "(buscar algo a fondo en el repo, una refactor puntual) sin llenar tu propio contexto con "
+        "los pasos intermedios. El sub-agente tiene las tools de filesystem y Bash, pero NO puede "
+        "lanzar otros sub-agentes ni agendar wakeups. Pasale TODO el contexto en `prompt`."
+    )
+    args_schema: type[BaseModel] = TaskInput
+    risk: Risk = Risk.SAFE  # el spawn es inocuo; el Bash del sub-agente sigue pasando por la policy
+
+    _harness: Any = PrivateAttr(default=None)
+
+    def bind_harness(self, harness: Any) -> None:
+        self._harness = harness
+
+    def _run(self, description: str, prompt: str) -> str:
+        if self._harness is None:
+            return self.error(
+                "Task no está conectada a un harness.",
+                "Esta tool solo funciona dentro de un Harness, que la conecta al construirse.",
+            )
+        result = self._harness.spawn_subagent(prompt)
+        return f"[sub-agente terminó: {description}]\n{result}"

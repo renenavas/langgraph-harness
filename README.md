@@ -32,7 +32,8 @@ BaseTool (LangChain)
         │       ├── WriteFileTool
         │       └── EditFileTool
         └── ControlTool      # tools that steer the agent, not the filesystem
-                └── WaitTool      # interrupts=True → non-blocking wait
+                ├── WaitTool      # interrupts=True → non-blocking wait
+                └── TaskTool      # spawns an isolated sub-agent
 ```
 
 - **`Harness`** (`harness.py`) — compiles the `StateGraph` (llm → tools → llm) and owns the run/resume lifecycle.
@@ -104,7 +105,7 @@ Inside the REPL: `/new` starts a fresh conversation, `/exit` (or Ctrl-D) quits. 
 
 ## Tool catalog
 
-Tool names mirror Claude Code's (`Read`, `Grep`, `Write`, `Edit`, `Bash`, `ScheduleWakeup`) so an agent already familiar with them feels at home.
+Tool names mirror Claude Code's (`Read`, `Glob`, `Grep`, `Write`, `Edit`, `Bash`, `Task`, `ScheduleWakeup`) so an agent already familiar with them feels at home.
 
 | Tool | Category | Risk | Notes |
 |---|---|---|---|
@@ -115,6 +116,7 @@ Tool names mirror Claude Code's (`Read`, `Grep`, `Write`, `Edit`, `Bash`, `Sched
 | `Edit` | filesystem | `reversible` | Exact-string replace; supports insert/delete/replace-all |
 | `Bash` | system | `destructive` | Run a shell command via `bash -c`; returns stdout+stderr and the exit code |
 | `ScheduleWakeup` | control | `safe` | Non-blocking pause via `interrupt()`; durable with a `WakeupStore` |
+| `Task` | control | `safe` | Spawn an isolated sub-agent (work tools only, no recursion); returns its final result |
 
 **Risk levels** drive the permission layer:
 

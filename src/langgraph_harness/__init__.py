@@ -14,6 +14,7 @@ from .tools import (
     ReadFileTool,
     Risk,
     SearchInFileTool,
+    TaskTool,
     WaitTool,
     WriteFileTool,
 )
@@ -39,5 +40,6 @@ __all__ = [
     "EditFileTool",
     "BashTool",
     "WaitTool",
+    "TaskTool",
     "DEFAULT_TOOLS",
 ]

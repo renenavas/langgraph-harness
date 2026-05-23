@@ -33,6 +33,13 @@ class HarnessTool(BaseTool):
     def error(msg: str, hint: str = "") -> str:
         return f"ERROR: {msg} {hint}".rstrip()
 
+    def bind_harness(self, harness: Any) -> None:
+        """
+        Hook que el Harness llama sobre cada tool al construirse, pasándose a sí mismo.
+        La mayoría de las tools lo ignoran; las que necesitan al harness (p. ej. Task,
+        que lanza sub-agentes) lo sobreescriben para capturar la referencia.
+        """
+
 
 class FileSystemTool(HarnessTool):
     category: str = "filesystem"

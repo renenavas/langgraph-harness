@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import threading
 import time
+import uuid
 from collections.abc import Iterator
 from typing import Annotated, Sequence, TypedDict
 
@@ -44,6 +45,14 @@ class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
 
 
+DEFAULT_SUBAGENT_PROMPT = (
+    "Sos un sub-agente autónomo. Resolvé la tarea que te dan de punta a punta y, al terminar, "
+    "respondé con el resultado final concreto (lo que el agente padre necesita saber), no con "
+    "un relato de los pasos. No tenés acceso a la conversación del padre: trabajá solo con lo "
+    "que está en el prompt. Si una tool falla, leé el error y reintentá."
+)
+
+
 class Harness:
     def __init__(
         self,
@@ -60,11 +69,16 @@ class Harness:
         self.policy = policy or PermissionPolicy()
         self.system_prompt = system_prompt
         self.wakeup_store = wakeup_store
+        self.model = model
         self.verbose = verbose
 
         tools = registry.all()
         self.llm = ChatAnthropic(model=model).bind_tools(tools)
         self.graph = self._build_graph(checkpointer or MemorySaver())
+
+        # Inyectarse en cada tool que lo necesite (p. ej. Task, que lanza sub-agentes).
+        for tool in tools:
+            tool.bind_harness(self)
 
     def _build_graph(self, checkpointer):
         graph = StateGraph(AgentState)
@@ -140,6 +154,30 @@ class Harness:
 
     def run(self, thread_id: str, message: str) -> str | None:
         return self._invoke(thread_id, {"messages": self._initial_messages(thread_id, message)})
+
+    def spawn_subagent(self, prompt: str) -> str:
+        """
+        Corre un sub-agente síncrono hasta el final y devuelve su texto final.
+
+        El sub-agente hereda modelo y policy, pero solo recibe las tools "de trabajo"
+        (no las ControlTool): así no puede lanzar otros sub-agentes ni agendar wakeups,
+        y termina en una sola pasada bloqueante. Estado efímero (MemorySaver propio).
+        """
+        sub_tools = [t for t in self.registry.all() if not isinstance(t, ControlTool)]
+        sub = Harness(
+            registry=ToolRegistry(sub_tools),
+            policy=self.policy,
+            system_prompt=DEFAULT_SUBAGENT_PROMPT,
+            model=self.model,
+            verbose=False,
+        )
+        thread_id = f"subagent-{uuid.uuid4().hex[:8]}"
+        config = {"configurable": {"thread_id": thread_id}}
+        result = sub.graph.invoke(
+            {"messages": sub._initial_messages(thread_id, prompt)}, config=config
+        )
+        messages = result.get("messages", [])
+        return self._text(messages[-1].content) if messages else "(el sub-agente no produjo salida)"
 
     def chat(self, thread_id: str, message: str) -> Iterator[tuple]:
         """
