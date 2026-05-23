@@ -3,6 +3,7 @@ from .permissions import Decision, PermissionPolicy, allow_all
 from .registry import ToolRegistry
 from .tools import (
     DEFAULT_TOOLS,
+    BashTool,
     ControlTool,
     EditFileTool,
     FileSystemTool,
@@ -28,6 +29,7 @@ __all__ = [
     "SearchInFileTool",
     "WriteFileTool",
     "EditFileTool",
+    "BashTool",
     "WaitTool",
     "DEFAULT_TOOLS",
 ]

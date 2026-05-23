@@ -6,7 +6,7 @@ from langgraph_harness.tools import ReadFileTool
 
 def test_register_and_get():
     reg = ToolRegistry(DEFAULT_TOOLS)
-    assert len(reg) == 5
+    assert len(reg) == 6
     assert reg.get("read_file").name == "read_file"
 
 
@@ -27,6 +27,7 @@ def test_by_category():
     fs = reg.by_category("filesystem")
     assert {t.name for t in fs} == {"read_file", "search_in_file", "write_file", "edit_file"}
     assert {t.name for t in reg.by_category("control")} == {"wait"}
+    assert {t.name for t in reg.by_category("system")} == {"bash"}
 
 
 def test_by_risk():
@@ -35,6 +36,8 @@ def test_by_risk():
     assert safe == {"read_file", "search_in_file", "wait"}
     reversible = {t.name for t in reg.by_risk(Risk.REVERSIBLE)}
     assert reversible == {"write_file", "edit_file"}
+    destructive = {t.name for t in reg.by_risk(Risk.DESTRUCTIVE)}
+    assert destructive == {"bash"}
 
 
 def test_contains():
