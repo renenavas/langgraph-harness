@@ -1,6 +1,6 @@
 # langgraph-harness
 
-A small, readable **agent harness** built on [LangGraph](https://github.com/langchain-ai/langgraph): a tool hierarchy, a permission layer, and a non-blocking `wait` — wired into a reusable agent loop.
+A small, readable **agent harness** built on [LangGraph](https://github.com/langchain-ai/langgraph): a typed tool hierarchy, a risk-based permission layer, isolated sub-agents, durable non-blocking scheduling, and automatic history summarization — wired into a reusable agent loop with an interactive REPL.
 
 It is intentionally minimal and well-documented so that **AI coding agents can read it, understand it, and extend it.** See [Contributing — LLM agents welcome](#contributing--llm-agents-welcome).
 
@@ -12,7 +12,9 @@ Most "agent" examples hard-code a single graph and a flat list of tools. This re
 
 1. **A tool class hierarchy** that adds metadata (risk, category) and shared behavior on top of LangChain's `BaseTool`.
 2. **A permission layer** that decides — per tool, by risk level — whether to `allow`, `deny`, or `ask` before execution.
-3. **A non-blocking `wait`** that suspends the graph and returns control to the caller, resuming later from a checkpoint instead of blocking a thread.
+3. **A non-blocking `ScheduleWakeup`** that suspends the graph and returns control to the caller, resuming later from a checkpoint instead of blocking a thread.
+
+On top of these, the harness adds isolated sub-agents (`Task`), durable scheduling that survives process restarts (`WakeupStore` + a worker daemon), automatic history summarization to bound context growth, and a Markdown-rendering interactive REPL.
 
 ### Design philosophy: errors are instructions, not exceptions
 
@@ -132,7 +134,7 @@ Tool names mirror Claude Code's (`Read`, `Glob`, `Grep`, `Write`, `Edit`, `Bash`
 uv run --extra dev pytest
 ```
 
-The suite covers tools, registry, and permission policy and runs without an API key.
+The suite (60+ tests) covers the tools, registry, permission policy, the durable wakeup store, the summarization/event helpers, and a chat regression — all without an API key (the one test that builds a `Harness` stubs the LLM).
 
 ---
 
@@ -142,7 +144,7 @@ The suite covers tools, registry, and permission policy and runs without an API 
 
 To be productive immediately, an agent should:
 
-1. **Read these files in order:** `tools/base.py` → `tools/filesystem.py` → `registry.py` → `permissions.py` → `harness.py`. They are short and self-explanatory.
+1. **Read these files in order:** `tools/base.py` → `tools/filesystem.py` → `tools/control.py` → `registry.py` → `permissions.py` → `scheduler.py` → `harness.py`. They are short and self-explanatory.
 2. **Honor the contract:** tools return `ERROR: ...` strings, never raise. Lead error strings with what went wrong and what to try next.
 3. **Classify risk honestly:** pick `safe` / `reversible` / `destructive` so the permission layer behaves correctly.
 4. **Add tests** for any new tool or behavior. They must pass without network access.
@@ -190,7 +192,7 @@ If your commit was authored by an agent, add a trailer so it is attributable:
 Co-Authored-By: <Agent Name> <noreply@example.com>
 ```
 
-Good first contributions: new filesystem tools (`delete_file`, `list_dir`, `move_file`), a persistent checkpointer (SQLite) for cross-process resume, or a richer `ask` callback for the permission layer.
+Good first contributions: new filesystem tools (`delete_file`, `list_dir`, `move_file`), web tools (`WebFetch` / `WebSearch`), a Postgres checkpointer, token-based trimming as an alternative to summarization, or a richer `ask` callback for the permission layer.
 
 ---
 
