@@ -133,11 +133,12 @@ def _short(value, limit: int = 40) -> str:
 
 def _print_banner(model: str, cwd: str, n_tools: int) -> None:
     mascot = "\n".join([
-        "▗▄▄▄▄▄▄▄▖",
-        "▐█ ▀ ▀ █▌",
-        "▐██ ▼ ██▌",
-        "▐▄▄▄▄▄▄▄▌",
-        "▝▘     ▝▘",
+        "▟█▙    ▟█▙",
+        "███████████",
+        "███ ███ ███",
+        "█████████",
+        "▜█ █ █▛",
+        "▝   ▘",
     ])
 
     left = Table.grid()
