@@ -51,49 +51,116 @@ class ReadFileTool(FileSystemTool):
         return f"[{file_path} — líneas {s}-{e} de {total}]\n{numbered}"
 
 
+class GlobInput(BaseModel):
+    pattern: str = Field(
+        description="Patrón glob. Soporta `**` para recursión. Ej: '**/*.py', 'src/*.ts', 'README*'."
+    )
+    path: str = Field(
+        default=".",
+        description="Directorio base donde buscar. Default: directorio actual.",
+    )
+
+
+class GlobTool(FileSystemTool):
+    name: str = "Glob"
+    description: str = (
+        "Encuentra archivos por patrón glob (soporta `**` recursivo) y los devuelve "
+        "ordenados por fecha de modificación (más reciente primero). Usá esta tool para "
+        "DESCUBRIR archivos antes de leerlos o editarlos. Para buscar CONTENIDO dentro de "
+        "los archivos usá Grep."
+    )
+    args_schema: type[BaseModel] = GlobInput
+    risk: Risk = Risk.SAFE
+
+    _MAX_RESULTS = 200
+
+    def _run(self, pattern: str, path: str = ".") -> str:
+        base = Path(path)
+        if not base.exists():
+            return self.error(f"'{path}' no existe.")
+        if not base.is_dir():
+            return self.error(f"'{path}' no es un directorio.", "Pasá un directorio como base.")
+
+        matches = sorted(
+            (p for p in base.glob(pattern) if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not matches:
+            return f"No hay archivos que matcheen '{pattern}' en '{path}'."
+
+        shown = matches[: self._MAX_RESULTS]
+        listing = "\n".join(str(p) for p in shown)
+        header = f"[{len(matches)} archivo(s) para '{pattern}' en {path}"
+        if len(matches) > self._MAX_RESULTS:
+            header += f"; mostrando los {self._MAX_RESULTS} más recientes"
+        return f"{header}]\n{listing}"
+
+
 class SearchInFileInput(BaseModel):
-    file_path: str = Field(description="Ruta al archivo donde buscar")
     pattern: str = Field(description="Texto literal o regex a buscar")
+    path: str = Field(
+        default=".",
+        description="Archivo o directorio donde buscar. Si es un directorio, busca "
+        "recursivamente. Default: directorio actual.",
+    )
     context_lines: int = Field(
         default=3,
         description="Cuántas líneas de contexto mostrar antes y después de cada match",
     )
     use_regex: bool = Field(default=False, description="Si es True, pattern es una regex")
+    glob: str | None = Field(
+        default=None,
+        description="Filtro de archivos cuando path es un directorio. Ej: '*.py'. "
+        "Si es None, busca en todos los archivos.",
+    )
 
 
 class SearchInFileTool(FileSystemTool):
     name: str = "Grep"
     description: str = (
-        "Busca un patrón en un archivo y devuelve las ocurrencias con número de línea "
-        "y líneas de contexto. Usá esta tool para:\n"
+        "Busca un patrón en un archivo o, si path es un directorio, recursivamente en todo "
+        "el árbol. Devuelve las ocurrencias con número de línea (y nombre de archivo cuando "
+        "es recursivo) más líneas de contexto. Usá esta tool para:\n"
         "  - Resolver ambigüedad en Edit (ver dónde aparece cada ocurrencia)\n"
         "  - Construir un old_string único incluyendo contexto circundante\n"
-        "  - Verificar si algo existe antes de editarlo"
+        "  - Verificar si algo existe antes de editarlo\n"
+        "Para encontrar archivos por nombre usá Glob."
     )
     args_schema: type[BaseModel] = SearchInFileInput
     risk: Risk = Risk.SAFE
 
     def _run(
         self,
-        file_path: str,
         pattern: str,
+        path: str = ".",
         context_lines: int = 3,
         use_regex: bool = False,
+        glob: str | None = None,
     ) -> str:
-        flag = [] if use_regex else ["-F"]
-        cmd = ["grep", "-n", f"--context={context_lines}", *flag, pattern, file_path]
+        target = Path(path)
+        if not target.exists():
+            return self.error(f"'{path}' no existe.")
+
+        flags = [] if use_regex else ["-F"]
+        cmd = ["grep", "-n", f"--context={context_lines}", *flags]
+        if target.is_dir():
+            cmd.append("-r")
+            if glob:
+                cmd.append(f"--include={glob}")
+        cmd += [pattern, str(target)]
         result = subprocess.run(cmd, capture_output=True, text=True)
 
         if result.returncode == 1:
             return (
-                f"No se encontró '{pattern}' en '{file_path}'. "
-                "Revisá el patrón o leé el archivo completo con Read."
+                f"No se encontró '{pattern}' en '{path}'. "
+                "Revisá el patrón, ampliá el path, o leé el archivo completo con Read."
             )
         if result.returncode > 1:
             return self.error(f"al buscar: {result.stderr.strip()}")
 
         count = result.stdout.count("\n")
-        return f"[{count} líneas de resultado para '{pattern}' en {file_path}]\n{result.stdout}"
+        return f"[{count} líneas de resultado para '{pattern}' en {path}]\n{result.stdout}"
 
 
 class WriteFileInput(BaseModel):

@@ -27,6 +27,7 @@ BaseTool (LangChain)
 └── HarnessTool          # adds: risk, category, error() helper
         ├── FileSystemTool   # adds: _require_file() shared guard
         │       ├── ReadFileTool
+        │       ├── GlobTool
         │       ├── SearchInFileTool
         │       ├── WriteFileTool
         │       └── EditFileTool
@@ -108,7 +109,8 @@ Tool names mirror Claude Code's (`Read`, `Grep`, `Write`, `Edit`, `Bash`, `Sched
 | Tool | Category | Risk | Notes |
 |---|---|---|---|
 | `Read` | filesystem | `safe` | Full file or a line range, line-numbered |
-| `Grep` | filesystem | `safe` | `grep -n` within a file, with context lines |
+| `Glob` | filesystem | `safe` | Find files by glob pattern (`**` recursive), newest first |
+| `Grep` | filesystem | `safe` | `grep -n` in a file or recursively across a directory, with context lines and a `glob` filter |
 | `Write` | filesystem | `reversible` | Create or overwrite |
 | `Edit` | filesystem | `reversible` | Exact-string replace; supports insert/delete/replace-all |
 | `Bash` | system | `destructive` | Run a shell command via `bash -c`; returns stdout+stderr and the exit code |

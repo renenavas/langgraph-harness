@@ -4,6 +4,7 @@ import pytest
 
 from langgraph_harness.tools import (
     EditFileTool,
+    GlobTool,
     ReadFileTool,
     SearchInFileTool,
     WriteFileTool,
@@ -102,10 +103,52 @@ def test_edit_insert(sample):
 
 
 def test_search_finds(sample):
-    out = SearchInFileTool().invoke({"file_path": str(sample), "pattern": "dos"})
+    out = SearchInFileTool().invoke({"path": str(sample), "pattern": "dos"})
     assert "linea dos" in out
 
 
 def test_search_not_found(sample):
-    out = SearchInFileTool().invoke({"file_path": str(sample), "pattern": "zzz"})
+    out = SearchInFileTool().invoke({"path": str(sample), "pattern": "zzz"})
     assert "No se encontró" in out
+
+
+def test_search_recursive_in_dir(tmp_path):
+    (tmp_path / "a.txt").write_text("hola mundo\n", encoding="utf-8")
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "b.txt").write_text("otro mundo\n", encoding="utf-8")
+    out = SearchInFileTool().invoke({"path": str(tmp_path), "pattern": "mundo", "context_lines": 0})
+    assert "a.txt" in out
+    assert "b.txt" in out
+
+
+def test_search_glob_filter(tmp_path):
+    (tmp_path / "keep.py").write_text("target here\n", encoding="utf-8")
+    (tmp_path / "skip.txt").write_text("target here\n", encoding="utf-8")
+    out = SearchInFileTool().invoke(
+        {"path": str(tmp_path), "pattern": "target", "glob": "*.py", "context_lines": 0}
+    )
+    assert "keep.py" in out
+    assert "skip.txt" not in out
+
+
+def test_glob_finds_recursive(tmp_path):
+    (tmp_path / "a.py").write_text("", encoding="utf-8")
+    sub = tmp_path / "pkg"
+    sub.mkdir()
+    (sub / "b.py").write_text("", encoding="utf-8")
+    (tmp_path / "c.txt").write_text("", encoding="utf-8")
+    out = GlobTool().invoke({"pattern": "**/*.py", "path": str(tmp_path)})
+    assert "a.py" in out
+    assert "b.py" in out
+    assert "c.txt" not in out
+
+
+def test_glob_no_match(tmp_path):
+    out = GlobTool().invoke({"pattern": "*.rs", "path": str(tmp_path)})
+    assert "No hay archivos" in out
+
+
+def test_glob_bad_path():
+    out = GlobTool().invoke({"pattern": "*", "path": "/no/existe/dir"})
+    assert out.startswith("ERROR:")
