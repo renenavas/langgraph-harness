@@ -256,6 +256,10 @@ class Harness:
                         yield ("wait", float(payload.get("wait_seconds", 1)), payload.get("reason", ""))
                     continue
                 for update in chunk.values():
+                    # Un nodo que no cambia el estado (p. ej. summarize en no-op) emite
+                    # None como update en stream_mode="updates".
+                    if not update:
+                        continue
                     for msg in update.get("messages", []):
                         yield from self._events_for_message(msg)
 
