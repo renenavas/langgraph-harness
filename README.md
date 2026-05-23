@@ -66,6 +66,19 @@ harness.run(thread_id="session-1", message="Read /tmp/notes.txt and tell me how 
 
 The `wait` tool is non-blocking: `run()` returns immediately and the agent resumes on a timer.
 
+## Interactive CLI
+
+A terminal REPL that feels like a coding assistant: type messages, the agent works in your current directory with multi-turn memory, tool calls stream as they happen, and destructive tools prompt for permission.
+
+```bash
+harness                      # REPL in the current directory
+harness --yes                # auto-approve all tools (no permission prompts)
+harness --model claude-...   # pick the model
+python -m langgraph_harness   # equivalent entry point
+```
+
+Inside the REPL: `/new` starts a fresh conversation, `/exit` (or Ctrl-D) quits. During an interactive turn the `wait` tool blocks synchronously so the prompt only returns once the agent's turn completes.
+
 ---
 
 ## Tool catalog

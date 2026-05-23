@@ -11,10 +11,18 @@ N segundos después con Command(resume=...), sin bloquear ningún hilo.
 from __future__ import annotations
 
 import threading
+import time
+from collections.abc import Iterator
 from typing import Annotated, Sequence, TypedDict
 
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -85,11 +93,13 @@ class Harness:
                 results.append(ToolMessage(
                     content=tool.resume_message(payload),
                     tool_call_id=tool_id,
+                    name=tool.name,
                 ))
             else:
                 results.append(ToolMessage(
                     content=str(tool.invoke(args)),
                     tool_call_id=tool_id,
+                    name=tool.name,
                 ))
 
         return {"messages": results}
@@ -108,13 +118,77 @@ class Harness:
             "El usuario rechazó esta acción. Probá un enfoque alternativo o explicá por qué la necesitás."
         )
 
-    def run(self, thread_id: str, message: str) -> str | None:
+    def _initial_messages(self, thread_id: str, message: str) -> list[BaseMessage]:
         messages: list[BaseMessage] = []
-        if self.system_prompt:
-            from langchain_core.messages import SystemMessage
+        if self.system_prompt and not self._has_history(thread_id):
             messages.append(SystemMessage(content=self.system_prompt))
         messages.append(HumanMessage(content=message))
-        return self._invoke(thread_id, {"messages": messages})
+        return messages
+
+    def _has_history(self, thread_id: str) -> bool:
+        state = self.graph.get_state({"configurable": {"thread_id": thread_id}})
+        return bool(state.values.get("messages")) if state else False
+
+    def run(self, thread_id: str, message: str) -> str | None:
+        return self._invoke(thread_id, {"messages": self._initial_messages(thread_id, message)})
+
+    def chat(self, thread_id: str, message: str) -> Iterator[tuple]:
+        """
+        Turno interactivo: streamea eventos a medida que ocurren y espera
+        el `wait` de forma sincrónica (bloquea el turno hasta reanudar).
+
+        Yields tuplas:
+          ("assistant", text)
+          ("tool_call", name, args)
+          ("tool_result", name, content)
+          ("wait", seconds, reason)
+        """
+        config = {"configurable": {"thread_id": thread_id}}
+        invocation = {"messages": self._initial_messages(thread_id, message)}
+
+        while True:
+            pending_wait = None
+            for chunk in self.graph.stream(invocation, config=config, stream_mode="updates"):
+                if "__interrupt__" in chunk:
+                    payload = chunk["__interrupt__"][0].value
+                    if isinstance(payload, dict) and payload.get("type") == "wait":
+                        pending_wait = payload
+                        yield ("wait", float(payload.get("wait_seconds", 1)), payload.get("reason", ""))
+                    continue
+                for update in chunk.values():
+                    for msg in update.get("messages", []):
+                        yield from self._events_for_message(msg)
+
+            if pending_wait:
+                time.sleep(float(pending_wait.get("wait_seconds", 1)))
+                invocation = Command(resume={"ok": True})
+            else:
+                break
+
+    @classmethod
+    def _events_for_message(cls, msg) -> Iterator[tuple]:
+        if isinstance(msg, AIMessage):
+            for call in msg.tool_calls or []:
+                yield ("tool_call", call["name"], call["args"])
+            text = cls._text(msg.content)
+            if text.strip():
+                yield ("assistant", text)
+        elif isinstance(msg, ToolMessage):
+            yield ("tool_result", msg.name or "?", str(msg.content))
+
+    @staticmethod
+    def _text(content) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+                elif isinstance(block, str):
+                    parts.append(block)
+            return "".join(parts)
+        return str(content)
 
     def _invoke(self, thread_id: str, invocation) -> str | None:
         config = {"configurable": {"thread_id": thread_id}}
