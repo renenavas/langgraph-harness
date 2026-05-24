@@ -92,16 +92,15 @@ When the agent hits a `wait`, the harness writes `(thread_id, resume_at, payload
 
 ## Interactive CLI
 
-A terminal REPL that feels like a coding assistant: type messages, the agent works in your current directory with multi-turn memory, tool calls stream as they happen, and destructive tools prompt for permission.
+A full-screen terminal app (built on [prompt_toolkit](https://github.com/prompt-toolkit/python-prompt-toolkit)) that feels like a coding assistant: a startup banner, a **fixed input box pinned to the bottom** between two rules, and the conversation scrolling above it — the input stays visible even while the agent works.
 
 ```bash
-harness                      # REPL in the current directory
-harness --yes                # auto-approve all tools (no permission prompts)
+harness                      # full-screen REPL in the current directory
 harness --model claude-...   # pick the model
-python -m langgraph_harness   # equivalent entry point
+python -m langgraph_harness  # equivalent entry point
 ```
 
-While the agent thinks, an animated spinner (a twinkling glyph, a rotating gerund, and an elapsed timer) shows on a background thread and clears as soon as output streams in. Inside the REPL: `/new` starts a fresh conversation, `/exit` (or Ctrl-D) quits. During an interactive turn the `ScheduleWakeup` tool blocks synchronously so the prompt only returns once the agent's turn completes.
+A status line under the input shows a "thinking" indicator (a twinkling glyph, a rotating gerund, and an elapsed timer) while a turn runs; the agent runs in a background thread so the UI stays responsive. Assistant replies are rendered with rich (tables, code, bold) into the scrolling area. `/new` starts a fresh conversation, `/exit` (or Ctrl-D) quits. Tools are auto-approved in the interactive app — for per-tool permission prompts use the `run()` API, whose default policy asks before destructive tools.
 
 ---
 

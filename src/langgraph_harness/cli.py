@@ -1,9 +1,13 @@
 """
-CLI interactivo (REPL) para el harness — estilo coding-assistant.
+CLI interactivo (REPL) para el harness — estilo coding-assistant, full-screen.
+
+El input queda fijo abajo (entre dos líneas) y la conversación sube por arriba,
+siempre visible incluso mientras el agente trabaja. Implementado con
+prompt_toolkit (app full-screen); el texto del agente se renderiza con rich a
+texto plano para conservar tablas y estructura Markdown dentro del área.
 
 Uso:
     harness                      # REPL en el directorio actual
-    harness --yes                # auto-aprueba todo (sin prompts de permiso)
     harness --model claude-...   # elige el modelo
     python -m langgraph_harness  # equivalente
 
@@ -15,14 +19,23 @@ Comandos dentro del REPL:
 from __future__ import annotations
 
 import argparse
-import itertools
 import os
 import random
-import sys
+import shutil
 import threading
 import time
 import uuid
+from io import StringIO
 
+from prompt_toolkit.application import Application, get_app
+from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.document import Document
+from prompt_toolkit.filters import Condition
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.layout import HSplit, Layout, Window
+from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+from prompt_toolkit.styles import Style
+from prompt_toolkit.widgets import TextArea
 from rich import box
 from rich.console import Console
 from rich.markdown import Markdown
@@ -46,19 +59,13 @@ DEFAULT_SYSTEM_PROMPT = (
     "key terms when it aids clarity."
 )
 
-_console = Console()
-
-# Glyph que titila + gerundio que rota: el "pensando" estilo coding-assistant.
+# Gerundios que rotan en la línea de estado mientras el agente piensa.
 _GLYPHS = "✻✽✼✺✶✷✸✹"
 _WORDS = [
     "Sublimating", "Thinking", "Pondering", "Cogitating", "Conjuring", "Percolating",
     "Ruminating", "Noodling", "Marinating", "Simmering", "Brewing", "Synthesizing",
     "Daydreaming", "Tinkering", "Scheming", "Untangling", "Manifesting", "Channeling",
 ]
-_GLYPH_COLOR = "\033[38;5;215m"  # salmón/naranja
-_BOLD = "\033[1m"
-_DIM = "\033[2m"
-_RESET = "\033[0m"
 
 
 def _fmt_elapsed(seconds: float) -> str:
@@ -66,64 +73,8 @@ def _fmt_elapsed(seconds: float) -> str:
     return f"{s // 60}m {s % 60}s" if s >= 60 else f"{s}s"
 
 
-class Spinner:
-    """Spinner animado en un hilo de fondo. No-op si stdout no es una TTY."""
-
-    def __init__(self) -> None:
-        self.start_time = time.time()
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._word = random.choice(_WORDS)
-        self._word_at = self.start_time
-        self._enabled = sys.stdout.isatty()
-
-    def _spin(self) -> None:
-        glyphs = itertools.cycle(_GLYPHS)
-        while not self._stop.wait(0.12):
-            now = time.time()
-            if now - self._word_at > 4:
-                self._word = random.choice(_WORDS)
-                self._word_at = now
-            elapsed = _fmt_elapsed(now - self.start_time)
-            line = (
-                f"\r{_GLYPH_COLOR}{next(glyphs)}{_RESET} {_BOLD}{self._word}…{_RESET} "
-                f"{_DIM}({elapsed} · Ctrl-C para cortar){_RESET}\033[K"
-            )
-            sys.stdout.write(line)
-            sys.stdout.flush()
-
-    def resume(self) -> None:
-        if not self._enabled or (self._thread and self._thread.is_alive()):
-            return
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._spin, daemon=True)
-        self._thread.start()
-
-    def pause(self) -> None:
-        if not self._enabled:
-            return
-        self._stop.set()
-        if self._thread:
-            self._thread.join()
-        sys.stdout.write("\r\033[K")  # limpia la línea del spinner
-        sys.stdout.flush()
-
-
-def _render(event: tuple) -> None:
-    kind = event[0]
-    if kind == "assistant":
-        print()
-        _console.print(Markdown(event[1].rstrip()))
-        print()
-    elif kind == "tool_call":
-        name, args = event[1], event[2]
-        compact = ", ".join(f"{k}={_short(v)}" for k, v in args.items())
-        print(f"  \033[2m⚙ {name}({compact})\033[0m")
-    elif kind == "tool_result":
-        first_line = str(event[2]).splitlines()[0] if event[2] else ""
-        print(f"  \033[2m↳ {_short(first_line, 100)}\033[0m")
-    elif kind == "wait":
-        print(f"  \033[2m⏳ wait {event[1]}s — {event[2]}\033[0m")
+def _term_width() -> int:
+    return max(40, shutil.get_terminal_size((100, 24)).columns - 2)
 
 
 def _short(value, limit: int = 40) -> str:
@@ -131,7 +82,13 @@ def _short(value, limit: int = 40) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _print_banner(model: str, cwd: str, n_tools: int) -> None:
+def _render_to_text(renderable, width: int) -> str:
+    buf = StringIO()
+    Console(file=buf, force_terminal=False, width=width).print(renderable)
+    return buf.getvalue()
+
+
+def _banner_panel(model: str, cwd: str, n_tools: int) -> Panel:
     mascot = "\n".join([
         "▟█▙    ▟█▙",
         "███████████",
@@ -162,71 +119,154 @@ def _print_banner(model: str, cwd: str, n_tools: int) -> None:
     body.add_column()
     body.add_row(left, right)
 
-    _console.print(Panel(
+    return Panel(
         body,
         title=f"langgraph-harness v{__version__}",
         title_align="left",
         border_style=_SALMON,
         box=box.ROUNDED,
         padding=(1, 2),
-    ))
+    )
 
 
-def _read_prompt() -> str:
-    """Input enmarcado entre dos líneas horizontales, estilo coding-assistant."""
-    _console.rule(style="grey39")
-    line = input("\033[1m› \033[0m")
-    _console.rule(style="grey39")
-    return line
+def _format_event(event: tuple) -> str:
+    kind = event[0]
+    if kind == "assistant":
+        return "\n" + _render_to_text(Markdown(event[1].rstrip()), _term_width()).rstrip("\n") + "\n"
+    if kind == "tool_call":
+        name, args = event[1], event[2]
+        compact = ", ".join(f"{k}={_short(v)}" for k, v in args.items())
+        return f"  · {name}({compact})\n"
+    if kind == "tool_result":
+        first = str(event[2]).splitlines()[0] if event[2] else ""
+        return f"    ↳ {_short(first, 100)}\n"
+    if kind == "wait":
+        return f"  ⏳ wait {event[1]}s — {event[2]}\n"
+    return ""
+
+
+_STYLE = Style.from_dict({
+    "rule": "fg:#444444",
+    "dim": "fg:#888888",
+    "salmon": f"fg:{_SALMON}",
+    "word": f"fg:{_SALMON} bold",
+    "prompt": "bold",
+})
+
+
+def build_app(harness: Harness, model: str) -> Application:
+    state = {"thread": uuid.uuid4().hex[:8], "busy": False, "start": 0.0, "word": "", "word_at": 0.0}
+
+    output = Buffer(read_only=Condition(lambda: True))
+
+    def emit(text: str) -> None:
+        def _do():
+            full = output.text + text
+            output.set_document(Document(full, len(full)), bypass_readonly=True)
+        try:
+            get_app().loop.call_soon_threadsafe(lambda: (_do(), get_app().invalidate()))
+        except Exception:
+            _do()
+
+    def run_turn(line: str) -> None:
+        state.update(busy=True, start=time.time(), word=random.choice(_WORDS), word_at=time.time())
+        try:
+            for event in harness.chat(state["thread"], line):
+                emit(_format_event(event))
+        except Exception as exc:  # noqa: BLE001 — un turno roto no debe tumbar el REPL
+            emit(f"\n  error: {exc}\n")
+        finally:
+            state["busy"] = False
+            try:
+                get_app().loop.call_soon_threadsafe(get_app().invalidate)
+            except Exception:
+                pass
+
+    def on_submit(buff: Buffer) -> bool:
+        line = buff.text.strip()
+        if not line:
+            return False
+        if line in ("/exit", "/quit"):
+            get_app().exit()
+            return False
+        if line == "/new":
+            state["thread"] = uuid.uuid4().hex[:8]
+            emit("\n  — nueva conversación —\n\n")
+            return False
+        if state["busy"]:
+            return False  # ignorar mientras el agente trabaja
+        emit(f"\n› {line}\n")
+        threading.Thread(target=run_turn, args=(line,), daemon=True).start()
+        return False
+
+    def status_text():
+        if state["busy"]:
+            now = time.time()
+            if now - state["word_at"] > 4:
+                state["word"] = random.choice(_WORDS)
+                state["word_at"] = now
+            glyph = _GLYPHS[int(now * 8) % len(_GLYPHS)]
+            elapsed = _fmt_elapsed(now - state["start"])
+            return [
+                ("class:salmon", f" {glyph} "),
+                ("class:word", f"{state['word']}… "),
+                ("class:dim", f"({elapsed} · Ctrl-C corta)"),
+            ]
+        return [("class:dim", "  /new reiniciar · /exit salir · ↑ historial del shell")]
+
+    input_area = TextArea(
+        height=1,
+        prompt="› ",
+        multiline=False,
+        wrap_lines=False,
+        accept_handler=on_submit,
+        style="class:prompt",
+    )
+    output_window = Window(BufferControl(buffer=output, focusable=False), wrap_lines=True)
+
+    root = HSplit([
+        output_window,
+        Window(height=1, char="─", style="class:rule"),
+        input_area,
+        Window(height=1, char="─", style="class:rule"),
+        Window(FormattedTextControl(status_text), height=1),
+    ])
+
+    kb = KeyBindings()
+
+    @kb.add("c-c")
+    @kb.add("c-d")
+    def _(event):
+        event.app.exit()
+
+    app = Application(
+        layout=Layout(root, focused_element=input_area),
+        key_bindings=kb,
+        style=_STYLE,
+        full_screen=True,
+        refresh_interval=0.25,
+        mouse_support=False,
+    )
+
+    emit(_render_to_text(_banner_panel(model, os.getcwd(), len(DEFAULT_TOOLS)), _term_width()))
+    return app
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="harness", description="Interactive agent harness REPL")
     parser.add_argument("--model", default="claude-sonnet-4-6", help="Anthropic model id")
-    parser.add_argument("--yes", action="store_true", help="auto-approve all tools (no permission prompts)")
     parser.add_argument("--system", default=DEFAULT_SYSTEM_PROMPT, help="system prompt")
     args = parser.parse_args(argv)
 
     harness = Harness(
         registry=ToolRegistry(DEFAULT_TOOLS),
-        policy=allow_all() if args.yes else None,
+        policy=allow_all(),  # los prompts de permiso interactivos en la TUI quedan para después
         system_prompt=args.system,
         model=args.model,
         verbose=False,
     )
-
-    thread_id = uuid.uuid4().hex[:8]
-    _print_banner(args.model, os.getcwd(), len(DEFAULT_TOOLS))
-
-    while True:
-        try:
-            line = _read_prompt().strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return 0
-
-        if not line:
-            continue
-        if line in ("/exit", "/quit"):
-            return 0
-        if line == "/new":
-            thread_id = uuid.uuid4().hex[:8]
-            print(f"\033[2mnueva conversación — thread={thread_id}\033[0m\n")
-            continue
-
-        spinner = Spinner()
-        spinner.resume()
-        try:
-            for event in harness.chat(thread_id, line):
-                spinner.pause()
-                _render(event)
-                spinner.resume()
-        except KeyboardInterrupt:
-            print("\n\033[2m(interrumpido)\033[0m\n")
-        except Exception as exc:  # noqa: BLE001 — el REPL no debe morir por un turno
-            print(f"\n\033[31merror: {exc}\033[0m\n", file=sys.stderr)
-        finally:
-            spinner.pause()
+    build_app(harness, args.model).run()
+    return 0
 
 
 if __name__ == "__main__":
