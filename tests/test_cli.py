@@ -6,7 +6,7 @@ from langgraph_harness import cli
 
 def test_format_event_tool_call():
     out = cli._format_event(("tool_call", "Read", {"file_path": "/x"}))
-    assert out.strip() == "· Read(file_path=/x)"
+    assert "· Read(file_path=/x)" in out
 
 
 def test_format_event_tool_result_first_line_only():
@@ -32,6 +32,5 @@ def test_build_app_constructs(monkeypatch):
     assert isinstance(app, Application)
     # output, rule, input, rule, status
     assert len(list(app.layout.find_all_windows())) == 5
-    # el banner quedó en el buffer de salida
-    output_buffer = app.layout.container.children[0].content.buffer
-    assert "langgraph-harness" in output_buffer.text
+    # el banner quedó en el output (ANSI), con el texto presente
+    assert "langgraph-harness" in app._output["ansi"]

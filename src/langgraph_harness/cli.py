@@ -29,11 +29,11 @@ from io import StringIO
 
 from prompt_toolkit.application import Application, get_app
 from prompt_toolkit.buffer import Buffer
-from prompt_toolkit.document import Document
-from prompt_toolkit.filters import Condition
+from prompt_toolkit.data_structures import Point
+from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import HSplit, Layout, Window
-from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import TextArea
 from rich import box
@@ -82,9 +82,10 @@ def _short(value, limit: int = 40) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _render_to_text(renderable, width: int) -> str:
+def _render_to_ansi(renderable, width: int) -> str:
+    """Renderiza un objeto rich a texto CON códigos ANSI, para mostrarlo con color."""
     buf = StringIO()
-    Console(file=buf, force_terminal=False, width=width).print(renderable)
+    Console(file=buf, force_terminal=True, color_system="truecolor", width=width).print(renderable)
     return buf.getvalue()
 
 
@@ -132,16 +133,16 @@ def _banner_panel(model: str, cwd: str, n_tools: int) -> Panel:
 def _format_event(event: tuple) -> str:
     kind = event[0]
     if kind == "assistant":
-        return "\n" + _render_to_text(Markdown(event[1].rstrip()), _term_width()).rstrip("\n") + "\n"
+        return "\n" + _render_to_ansi(Markdown(event[1].rstrip()), _term_width()).rstrip("\n") + "\n"
     if kind == "tool_call":
         name, args = event[1], event[2]
         compact = ", ".join(f"{k}={_short(v)}" for k, v in args.items())
-        return f"  · {name}({compact})\n"
+        return f"\033[2m  · {name}({compact})\033[0m\n"
     if kind == "tool_result":
         first = str(event[2]).splitlines()[0] if event[2] else ""
-        return f"    ↳ {_short(first, 100)}\n"
+        return f"\033[2m    ↳ {_short(first, 100)}\033[0m\n"
     if kind == "wait":
-        return f"  ⏳ wait {event[1]}s — {event[2]}\n"
+        return f"\033[2m  ⏳ wait {event[1]}s — {event[2]}\033[0m\n"
     return ""
 
 
@@ -157,12 +158,11 @@ _STYLE = Style.from_dict({
 def build_app(harness: Harness, model: str) -> Application:
     state = {"thread": uuid.uuid4().hex[:8], "busy": False, "start": 0.0, "word": "", "word_at": 0.0}
 
-    output = Buffer(read_only=Condition(lambda: True))
+    out = {"ansi": ""}
 
     def emit(text: str) -> None:
         def _do():
-            full = output.text + text
-            output.set_document(Document(full, len(full)), bypass_readonly=True)
+            out["ansi"] += text
         try:
             get_app().loop.call_soon_threadsafe(lambda: (_do(), get_app().invalidate()))
         except Exception:
@@ -222,7 +222,14 @@ def build_app(harness: Harness, model: str) -> Application:
         accept_handler=on_submit,
         style="class:prompt",
     )
-    output_window = Window(BufferControl(buffer=output, focusable=False), wrap_lines=True)
+    # FormattedTextControl con ANSI conserva los colores de rich; el cursor apunta a la
+    # última línea para que la ventana scrollee al fondo a medida que entra texto.
+    output_control = FormattedTextControl(
+        lambda: ANSI(out["ansi"]),
+        get_cursor_position=lambda: Point(x=0, y=out["ansi"].count("\n")),
+        focusable=False,
+    )
+    output_window = Window(output_control, wrap_lines=True)
 
     root = HSplit([
         output_window,
@@ -248,7 +255,8 @@ def build_app(harness: Harness, model: str) -> Application:
         mouse_support=False,
     )
 
-    emit(_render_to_text(_banner_panel(model, os.getcwd(), len(DEFAULT_TOOLS)), _term_width()))
+    app._output = out  # seam para tests
+    emit(_render_to_ansi(_banner_panel(model, os.getcwd(), len(DEFAULT_TOOLS)), _term_width()))
     return app
 
 
