@@ -1,11 +1,19 @@
 from .base import ControlTool, FileSystemTool, HarnessTool, Risk
 from .control import TaskTool, WaitTool
-from .filesystem import EditFileTool, GlobTool, ReadFileTool, SearchInFileTool, WriteFileTool
+from .filesystem import (
+    EditFileTool,
+    GlobTool,
+    ListDirTool,
+    ReadFileTool,
+    SearchInFileTool,
+    WriteFileTool,
+)
 from .system import BashTool
 
 DEFAULT_TOOLS = [
     ReadFileTool(),
     GlobTool(),
+    ListDirTool(),
     SearchInFileTool(),
     WriteFileTool(),
     EditFileTool(),
@@ -21,6 +29,7 @@ __all__ = [
     "Risk",
     "ReadFileTool",
     "GlobTool",
+    "ListDirTool",
     "SearchInFileTool",
     "WriteFileTool",
     "EditFileTool",

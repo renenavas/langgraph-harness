@@ -29,6 +29,7 @@ BaseTool (LangChain)
 └── HarnessTool          # adds: risk, category, error() helper
         ├── FileSystemTool   # adds: _require_file() shared guard
         │       ├── ReadFileTool
+        │       ├── ListDirTool
         │       ├── GlobTool
         │       ├── SearchInFileTool
         │       ├── WriteFileTool
@@ -106,11 +107,12 @@ A status line under the input shows a "thinking" indicator (a twinkling glyph, a
 
 ## Tool catalog
 
-Tool names mirror Claude Code's (`Read`, `Glob`, `Grep`, `Write`, `Edit`, `Bash`, `Task`, `ScheduleWakeup`) so an agent already familiar with them feels at home.
+Existing tool names mirror Claude Code's (`Read`, `Glob`, `Grep`, `Write`, `Edit`, `Bash`, `Task`, `ScheduleWakeup`) so an agent already familiar with them feels at home. `ListDir` adds read-only directory discovery without a shell call.
 
 | Tool | Category | Risk | Notes |
 |---|---|---|---|
 | `Read` | filesystem | `safe` | Full file or a line range, line-numbered |
+| `ListDir` | filesystem | `safe` | Immediate entries (including hidden), sorted by name; at most 200, with types and quoted names; no recursion or following child symlinks |
 | `Glob` | filesystem | `safe` | Find files by glob pattern (`**` recursive), newest first |
 | `Grep` | filesystem | `safe` | `grep -n` in a file or recursively across a directory, with context lines and a `glob` filter |
 | `Write` | filesystem | `reversible` | Create or overwrite |
@@ -191,7 +193,7 @@ If your commit was authored by an agent, add a trailer so it is attributable:
 Co-Authored-By: <Agent Name> <noreply@example.com>
 ```
 
-Good first contributions: new filesystem tools (`delete_file`, `list_dir`, `move_file`), web tools (`WebFetch` / `WebSearch`), a Postgres checkpointer, token-based trimming as an alternative to summarization, or a richer `ask` callback for the permission layer.
+Good first contributions: new filesystem tools (`delete_file`, `move_file`), web tools (`WebFetch` / `WebSearch`), a Postgres checkpointer, token-based trimming as an alternative to summarization, or a richer `ask` callback for the permission layer.
 
 ---
 
