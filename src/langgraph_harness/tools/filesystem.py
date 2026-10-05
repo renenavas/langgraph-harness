@@ -51,6 +51,50 @@ class ReadFileTool(FileSystemTool):
         return f"[{file_path} — líneas {s}-{e} de {total}]\n{numbered}"
 
 
+class ListDirInput(BaseModel):
+    path: str = Field(default=".", description="Directorio a listar. Default: directorio actual.")
+
+
+class ListDirTool(FileSystemTool):
+    name: str = "ListDir"
+    description: str = (
+        "Lista las entradas inmediatas de un directorio, incluidos archivos ocultos, "
+        "ordenadas por nombre. No recorre subdirectorios ni sigue enlaces simbólicos de las entradas. "
+        "Cada línea indica el tipo (dir/file/link/other) y el nombre entre comillas. "
+        "Devuelve hasta 200 entradas; para buscar recursivamente usá Glob."
+    )
+    args_schema: type[BaseModel] = ListDirInput
+    risk: Risk = Risk.SAFE
+
+    _MAX_RESULTS = 200
+
+    def _run(self, path: str = ".") -> str:
+        base = Path(path)
+        try:
+            entries = sorted(base.iterdir(), key=lambda entry: entry.name)
+            listing = []
+            for entry in entries[: self._MAX_RESULTS]:
+                if entry.is_symlink():
+                    kind = "link"
+                elif entry.is_dir():
+                    kind = "dir"
+                elif entry.is_file():
+                    kind = "file"
+                else:
+                    kind = "other"
+                listing.append(f"{kind} {entry.name!r}")
+        except (OSError, ValueError) as exc:
+            return self.error(
+                f"No se pudo listar {path!r}: {exc}.",
+                "Verificá que la ruta sea un directorio accesible y volvé a intentar.",
+            )
+
+        header = f"[{len(entries)} entrada(s) en {path!r}"
+        if len(entries) > self._MAX_RESULTS:
+            header += f"; mostrando las primeras {self._MAX_RESULTS} por nombre"
+        return f"{header}]" + ("\n" + "\n".join(listing) if listing else "")
+
+
 class GlobInput(BaseModel):
     pattern: str = Field(
         description="Patrón glob. Soporta `**` para recursión. Ej: '**/*.py', 'src/*.ts', 'README*'."
